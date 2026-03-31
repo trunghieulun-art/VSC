@@ -1,0 +1,84 @@
+import json
+import re
+from collections import Counter
+from typing import List, Set, Tuple
+
+from common import ModelData
+
+
+def clean_vietnamese_text(raw_text: str) -> List[str]:
+    """Lọc các từ không phải Tiếng Việt"""
+
+    # Chuẩn hoá đầu vào
+    text: str = raw_text.lower()
+
+    # Loại bỏ các từ không có trong danh sách
+    vie_chars: str = (
+        "a-zàáãạảăắằẵặẳâấầẫậẩđèéẽẹẻêếềễệểìíĩịỉòóõọỏôốồỗộổơớờỡợởùúũụủưứừữựửỳýỹỵỷ"
+    )
+    pattern: str = rf"[^{vie_chars}\s]"
+    # Các từ ví dụ như "T0i" qua sàng lọc sẽ thành ["t", "i"]
+    # Các chữ cái đơn lẻ hoặc không có nghĩa khi qua bước training
+    # sẽ có xác suất xuất hiện rất thấp tuỳ dữ liệu đầu vào
+    text: str = re.sub(pattern, " ", text)
+
+    # Lọc khoảng trắng
+    text: str = re.sub(r"\s+", " ", text).strip()
+
+    return text.split()
+
+
+def train_and_save_model(
+    text_corpus: str,
+    output_filename="language_model.json",
+    external_dict_path: str | None = None,
+) -> None:
+    print("Training N-grams từ Corpus...")
+
+    # Lọc và trả về bộ từ khoá xếp theo thứ tự tương ứng
+    # với đầu vào
+    words: List[str] = clean_vietnamese_text(text_corpus)
+
+    print("Thống kê Unigram & Bigram...")
+    # Đếm số lần xuất hiện của các từ
+    unigram_counts: Counter[str] = Counter(words)
+
+    # Ghép 2 từ đứng cạnh nhau để sinh tổ hợp
+    bigrams: zip[Tuple[str, str]] = zip(words, words[1:])
+    # Đếm tần suất xuất hiện tổ hợp đó trong đầu vào
+    bigram_counts: Counter[str] = Counter([f"{w1} {w2}" for w1, w2 in bigrams])
+
+    vocab_set: Set[str] = set(words)
+    print(f"-> Vocab từ Corpus: {len(vocab_set)} từ.")
+
+    if external_dict_path:
+        print(f"Đang nạp từ điển ngoài: '{external_dict_path}'...")
+        try:
+            with open(external_dict_path, "r", encoding="utf-8") as f:
+                # Đọc từng dòng, xoá khoảng trắng thừa và chuyển thành chữ thường
+                external_words = [line.strip().lower() for line in f if line.strip()]
+
+                # Chạy qua hàm clean để đảm bảo từ điển ngoài không dính rác
+                clean_external_words = []
+                for w in external_words:
+                    clean_external_words.extend(clean_vietnamese_text(w))
+
+                # Gộp vào tập Vocab hiện tại
+                vocab_set.update(clean_external_words)
+
+            print(f"-> Đã nạp thêm từ vựng. Tổng Vocab hiện tại: {len(vocab_set)} từ.")
+        except FileNotFoundError:
+            print(f"File not found: '{external_dict_path}'. Skip this step.")
+
+    # Khởi tạo cấu trúc lưu model
+    model_data: ModelData = {
+        "vocab": list(vocab_set),
+        "unigrams": dict(unigram_counts),
+        "bigrams": dict(bigram_counts),
+    }
+
+    print("Writing to JSON...")
+    with open(output_filename, "w", encoding="utf-8") as f:
+        json.dump(model_data, f, ensure_ascii=False, indent=4)
+
+    print(f"Done! File saved to: {output_filename}")
