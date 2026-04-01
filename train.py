@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from collections import Counter
 from typing import List, Set, Tuple
@@ -82,3 +83,30 @@ def train_and_save_model(
         json.dump(model_data, f, ensure_ascii=False, indent=4)
 
     print(f"Done! File saved to: {output_filename}")
+
+
+def load_corpus_from_folder(folder_path: str) -> str:
+    # Quét và đọc nội dung toàn bộ file .txt trong thư mục
+    corpus_list: List[str] = []
+
+    if not os.path.exists(folder_path):
+        raise FileNotFoundError(f"File not found: {folder_path}")
+
+    # Quét tất cả các file trong thư mục
+    file_count = 0
+    for filename in os.listdir(folder_path):
+        if filename.endswith(".txt"):
+            file_path = os.path.join(folder_path, filename)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    print(f"  + Reading: {filename}...")
+                    corpus_list.append(f.read())
+                    file_count += 1
+            except Exception as e:
+                print(f"  Error while reading {filename}: {e}")
+
+    if file_count > 0:
+        print(f"Merged {file_count} file .txt!")
+
+    # Nối tất cả nội dung lại thành 1 chuỗi khổng lồ
+    return "\n".join(corpus_list)
