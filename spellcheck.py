@@ -3,35 +3,29 @@ import json
 import math
 from typing import Dict, List, Set, Tuple
 
+from config import SpellCheckerConfig
+from layout import get_keyboard_coordinates, keyboard_matrix
 from text_utils import to_standard_telex
 
 
 class MLSpellChecker:
     def __init__(
         self,
-        model_path: str = "language_model.json",
-        top_n: int = 20,  # Số lượng ứng viên tối đa cho mỗi từ
-        cutoff: float = 0.4,  # Ngưỡng giống nhau tối thiểu của mặt chữ (40%)
-        sim_weight: int = 3,  # Trọng số phạt mặt chữ sai (Lũy thừa 3)
-        context_weight: int = 2,  # Trọng số thưởng ngữ cảnh đúng (Lũy thừa 2)
+        config: SpellCheckerConfig,
         debug: bool = False,
         detail_log: bool = False,
     ) -> None:
+        self.cfg = config
         self.debug = debug
         self.detail_log = detail_log
 
         print("Loading model...")
-        with open(model_path, "r", encoding="utf-8") as f:
+        with open(self.cfg.model_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
         self.vocab: Set[str] = set(data["vocab"])
         self.unigrams: Dict[str, int] = data["unigrams"]
         self.bigrams: Dict[str, int] = data["bigrams"]
-
-        self.top_n: int = top_n
-        self.cutoff: float = cutoff
-        self.sim_weight: int = sim_weight
-        self.context_weight: int = context_weight
 
         self.telex_to_vocab: Dict[str, List[str]] = {}
         for w in self.vocab:
@@ -41,6 +35,8 @@ class MLSpellChecker:
             self.telex_to_vocab[t].append(w)
 
         self.telex_vocab_list: List[str] = list(self.telex_to_vocab.keys())
+
+        self.kb_coords = get_keyboard_coordinates(keyboard_matrix=keyboard_matrix)
         print(f"Done! The dictionary has {len(self.vocab)} words.")
 
     # SINH CANDIDATE
@@ -73,7 +69,10 @@ class MLSpellChecker:
 
                 # Fuzzy match trên tập con TELEX
                 context_telex_matches: List[str] = difflib.get_close_matches(
-                    error_telex, context_telex_list, n=self.top_n, cutoff=self.cutoff
+                    error_telex,
+                    context_telex_list,
+                    n=self.cfg.top_n,
+                    cutoff=self.cfg.cutoff,
                 )
 
                 # Ánh xạ ngược từ Telex về chữ Tiếng Việt thật
@@ -83,28 +82,91 @@ class MLSpellChecker:
                             candidates.append(real_word)
 
         # Bổ sung từ Unigram nếu chưa đủ số lượng top_n
-        if len(candidates) < self.top_n:
+        if len(candidates) < self.cfg.top_n:
             # Tìm trên toàn bộ từ điển TELEX
             general_telex_matches: List[str] = difflib.get_close_matches(
-                error_telex, self.telex_vocab_list, n=self.top_n, cutoff=self.cutoff
+                error_telex,
+                self.telex_vocab_list,
+                n=self.cfg.top_n,
+                cutoff=self.cfg.cutoff,
             )
             for gtm in general_telex_matches:
                 for real_word in self.telex_to_vocab[gtm]:
                     if real_word not in candidates:
                         candidates.append(real_word)
 
-        return candidates[: self.top_n]
+        return candidates[: self.cfg.top_n]
+
+    def get_kb_cost(self, char1: str, char2: str) -> float:
+        # Tính phí phạt khi gõ nhầm char1 thành char2 dựa trên tọa độ bàn phím
+        if char1 == char2:
+            return 0.0
+
+        if char1 not in self.kb_coords or char2 not in self.kb_coords:
+            return self.cfg.unknown_char_penalty
+
+        x1, y1 = self.kb_coords[char1]
+        x2, y2 = self.kb_coords[char2]
+        # Công thức tính khoảng cách học năm c2, c3 và calculus
+        dist = math.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+
+        # Chuẩn hóa khoảng cách.
+        return min(dist / self.cfg.max_kb_distance, 1.0)
+
+    def keyboard_aware_similarity(self, word1: str, word2: str) -> float:
+        # Thuật toán Damerau-Levenshtein kết hợp Khoảng cách bàn phím
+
+        m, n = len(word1), len(word2)
+        dp = [[0.0] * (n + 1) for _ in range(m + 1)]
+
+        # Khởi tạo ma trận
+        for i in range(m + 1):
+            dp[i][0] = float(i)
+        for j in range(n + 1):
+            dp[0][j] = float(j)
+
+        # Tính toán chi phí biến đổi
+        for i in range(1, m + 1):
+            for j in range(1, n + 1):
+                cost = self.get_kb_cost(word1[i - 1], word2[j - 1])
+                dp[i][j] = min(
+                    dp[i - 1][j] + 1.0,  # Deletion (Xóa 1 ký tự)
+                    dp[i][j - 1] + 1.0,  # Insertion (Thêm 1 ký tự)
+                    dp[i - 1][j - 1] + cost,  # Substitution (Gõ nhầm ký tự)
+                )
+
+                # Phép toán đảo vị trí (DAMERAU)
+                if (
+                    i > 1
+                    and j > 1
+                    and word1[i - 1] == word2[j - 2]
+                    and word1[i - 2] == word2[j - 1]
+                ):
+                    dp[i][j] = min(
+                        dp[i][j], dp[i - 2][j - 2] + self.cfg.transposition_cost
+                    )
+
+        max_len = max(m, n)
+        if max_len == 0:
+            return 1.0
+
+        # Đổi từ 'Khoảng cách' (0.0 -> max_len) sang 'Độ giống nhau' (0.0 -> 1.0)
+        distance = dp[m][n]
+        sim = 1.0 - (distance / max_len)
+
+        return max(0.0, sim)
 
     # TÍNH ĐIỂM
     def calculate_score(
         self, candidate: str, error_word: str, prev_word: str | None
     ) -> float:
-        error_telex = to_standard_telex(error_word)
-        cand_telex = to_standard_telex(candidate)
+        error_telex: str = to_standard_telex(error_word)
+        cand_telex: str = to_standard_telex(candidate)
 
-        sim_score: float = difflib.SequenceMatcher(
-            None, error_telex, cand_telex
-        ).ratio()
+        # sim_score: float = difflib.SequenceMatcher(
+        #     None, error_telex, cand_telex
+        # ).ratio()
+        sim_score: float = self.keyboard_aware_similarity(error_telex, cand_telex)
 
         # Frequency Score (Dùng Add-1 Smoothing)
         freq_score: int = self.unigrams.get(candidate, 1)
@@ -117,13 +179,13 @@ class MLSpellChecker:
 
             # Stutter Penalty (Phạt nếu lặp từ)
             if candidate == prev_word:
-                context_score *= 0.01
+                context_score *= self.cfg.stutter_penalty
 
         # TỔNG ĐIỂM
         total_score: float = (
-            (sim_score**self.sim_weight)
+            (sim_score**self.cfg.sim_weight)
             * math.log2(freq_score + 1)
-            * (context_score**self.context_weight)
+            * (context_score**self.cfg.context_weight)
         )
 
         if self.debug and self.detail_log:

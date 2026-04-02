@@ -1,7 +1,7 @@
 import argparse
 import sys
-from typing import List
 
+from config import SpellCheckerConfig
 from spellcheck import MLSpellChecker
 from train import load_corpus_from_folder, train_and_save_model
 
@@ -33,12 +33,16 @@ def run_train(args):
 
 def run_check(args):
     try:
-        checker = MLSpellChecker(
+        config = SpellCheckerConfig(
             model_path=args.model_path,
             top_n=args.top_n,
             cutoff=args.cutoff,
             sim_weight=args.sim_weight,
             context_weight=args.context_weight,
+        )
+
+        checker = MLSpellChecker(
+            config=config,
             debug=args.debug,
             detail_log=args.detail,
         )

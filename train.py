@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from typing import List, Set, Tuple
 
-from common import ModelData
+from config import ModelData
 
 
 def clean_vietnamese_text(raw_text: str) -> List[str]:
