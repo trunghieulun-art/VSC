@@ -32,3 +32,7 @@ python main.py train --help
 ```fish
 python main.py check --help
 ```
+
+### Tuning
+
+Write custom code to evaluate the model. You can see the example in `tune.py`, run `python tune.py`.

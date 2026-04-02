@@ -33,13 +33,7 @@ def run_train(args):
 
 def run_check(args):
     try:
-        config = SpellCheckerConfig(
-            model_path=args.model_path,
-            top_n=args.top_n,
-            cutoff=args.cutoff,
-            sim_weight=args.sim_weight,
-            context_weight=args.context_weight,
-        )
+        config = SpellCheckerConfig(model_path=args.model_path)
 
         checker = MLSpellChecker(
             config=config,
@@ -107,29 +101,6 @@ def main():
         type=str,
         default="language_model.json",
         help="Đường dẫn đến file model",
-    )
-
-    # Các siêu tham số (Hyperparameters)
-    parser_check.add_argument(
-        "--top_n",
-        type=int,
-        default=20,
-        help="Số lượng ứng viên sinh ra tối đa (Mặc định: 20)",
-    )
-    parser_check.add_argument(
-        "--cutoff", type=float, default=0.4, help="Ngưỡng giống mặt chữ (Mặc định: 0.4)"
-    )
-    parser_check.add_argument(
-        "--sim_weight",
-        type=int,
-        default=3,
-        help="Trọng số phạt mặt chữ sai (Mặc định: mũ 3)",
-    )
-    parser_check.add_argument(
-        "--context_weight",
-        type=int,
-        default=2,
-        help="Trọng số thưởng ngữ cảnh đúng (Mặc định: mũ 2)",
     )
 
     # Các cờ (flags) debug
